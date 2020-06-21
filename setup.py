@@ -11,7 +11,13 @@ setup(
     author_email="Vancoppenolle@ferret-go.com",
     packages=[
         "reliableredisqueue",
+        "reliableredisqueue._scripts",
     ],
+    package_data={
+        "reliableredisqueue": [
+            "_scripts/*.lua",
+        ]
+    },
     extras_require={
         "test": [
             "fakeredis>=1.2.1,<2.0",

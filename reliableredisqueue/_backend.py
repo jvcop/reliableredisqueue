@@ -1,60 +1,8 @@
 import time
 
+from . import _scripts
+
 NAMESPACE = "rrq"
-
-_GET_SCRIPT = """
-local items = KEYS[1]
-local ready = KEYS[2]
-local unacked = KEYS[3]
-local timestamp = tonumber(ARGV[1])
-local max_age = timestamp - tonumber(ARGV[2])
-local uids = redis.call('ZRANGEBYSCORE', unacked, 0, max_age)
-if #uids > 0 then
-    redis.call('LPUSH', ready, table.unpack(uids))
-    redis.call('ZREMRANGEBYSCORE', unacked, 0, max_age)
-end
--- The loop will run a single iteration most of the time.
-while true do
-    local uid = redis.call('LINDEX', ready, -1)
-    if not uid then
-        break
-    end
-    local item = redis.call('HGET', items, uid)
-    if item then
-        redis.call('ZADD', unacked, timestamp, uid)
-        redis.call('RPOP', ready)
-        return {uid, item}
-    end
-    redis.call('RPOP', ready)
-end
-return nil
-"""
-
-_ACK_SCRIPT = """
-local items = KEYS[1]
-local unacked = KEYS[3]
-local uid = ARGV[1]
-local timestamp = redis.call('ZSCORE', unacked, uid)
-if timestamp then
-    redis.call('HDEL', items, uid)
-    redis.call('ZREM', unacked, uid)
-    return true
-end
-return false
-"""
-
-_FAIL_SCRIPT = """
-local ready = KEYS[2]
-local unacked = KEYS[3]
-local uid = ARGV[1]
-local timestamp = redis.call('ZSCORE', unacked, uid)
-if timestamp then
-    redis.call('LPUSH', ready, uid)
-    redis.call('ZREM', unacked, uid)
-    return true
-end
-return false
-"""
 
 
 def _make_key(name, suffix):
@@ -69,9 +17,9 @@ class RedisQueue:
         self._ready = _make_key(name, "ready")
         self._unacked = _make_key(name, "unacked")
         self._keys = [self._items, self._ready, self._unacked]
-        self._get = redis.register_script(_GET_SCRIPT)
-        self._ack = redis.register_script(_ACK_SCRIPT)
-        self._fail = redis.register_script(_FAIL_SCRIPT)
+        self._get = redis.register_script(_scripts.GET)
+        self._ack = redis.register_script(_scripts.ACK)
+        self._fail = redis.register_script(_scripts.FAIL)
 
     def info(self):
         with self.redis.pipeline() as pipe:
