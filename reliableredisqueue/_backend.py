@@ -34,8 +34,8 @@ class RedisQueue:
 
     def put(self, item, uid):
         with self.redis.pipeline() as pipe:
-            pipe.hset(self._items, uid, item)
             pipe.lpush(self._ready, uid)
+            pipe.hset(self._items, uid, item)
             pipe.execute()
 
     def get(self):
