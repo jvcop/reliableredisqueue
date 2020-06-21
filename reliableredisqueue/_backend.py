@@ -6,7 +6,7 @@ NAMESPACE = "rrq"
 
 
 def _make_key(name, suffix):
-    return f"{NAMESPACE}:{name}.{suffix}"
+    return f"{NAMESPACE}:{name}:{suffix}"
 
 
 class RedisQueue:
