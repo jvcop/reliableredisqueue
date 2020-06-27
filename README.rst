@@ -51,11 +51,11 @@ For consumers, run:
 .. code-block:: bash
 
     make
-    make bench_consumer
+    bin/python benchmark/bench.py consumer
 
 For producers, run:
 
 .. code-block:: bash
 
     make
-    make bench_producer
+    bin/python benchmark/bench.py producer

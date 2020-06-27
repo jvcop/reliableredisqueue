@@ -1,24 +1,29 @@
 import argparse
 import functools
 import gc
+import random
 import time
 
 from redis import Redis
 from reliableredisqueue import Queue
 
-_ROUNDS = 3
+random.seed(73)
+
+_NUM_JOBS = 10000
+_NUM_ROUNDS = 3
 
 
 def benchmark(func):
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(queue, num_jobs, **kwargs):
         gc.disable()
         timings = []
         try:
-            for _ in range(_ROUNDS):
-                timings.append(func(*args, **kwargs))
+            for _ in range(_NUM_ROUNDS):
+                timings.append(func(queue, num_jobs, **kwargs))
         finally:
             gc.enable()
+            queue.purge()
 
         return min(timings)
 
@@ -26,14 +31,16 @@ def benchmark(func):
 
 
 @benchmark
-def bench_consumer(queue, num_jobs):
+def benchmark_consumer(queue, num_jobs, unacked_prob=0.0):
     for index in range(num_jobs):
         queue.put(index)
 
+    rand = random.random
     t0 = time.time()
     for _ in range(num_jobs):
         job = queue.get(block=False)
-        queue.ack(job)
+        if not unacked_prob or rand() > unacked_prob:
+            queue.ack(job)
 
     t1 = time.time()
     queue.purge()
@@ -41,7 +48,7 @@ def bench_consumer(queue, num_jobs):
 
 
 @benchmark
-def bench_producer(queue, num_jobs):
+def benchmark_producer(queue, num_jobs):
     t0 = time.time()
     for index in range(num_jobs):
         queue.put(index)
@@ -54,14 +61,14 @@ def bench_producer(queue, num_jobs):
 class SimpleQueue:
     def __init__(self, redis):
         self.redis = redis
-        self._ready = "rrq:baseline.ready"
-        self._unacked = "rrq:baseline.unacked"
+        self._ready = "rrq:baseline:ready"
+        self._unacked = "rrq:baseline:unacked"
 
     def put(self, item):
         self.redis.lpush(self._ready, item)
 
     def get(self, block=False):
-        assert not block
+        assert not block, "baseline does not support blocking"
         return self.redis.rpoplpush(self._ready, self._unacked)
 
     def ack(self, item):
@@ -75,29 +82,76 @@ class SimpleQueue:
 
 
 def cli():
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("target", choices=("consumer", "producer"))
-    arg_parser.add_argument("--redis-url", default="redis://localhost:6379")
-    arg_parser.add_argument("--baseline", action="store_true")
-    args = arg_parser.parse_args()
-    if args.target == "consumer":
-        func = bench_consumer
-    else:
-        func = bench_producer
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--redis",
+        dest="redis_url",
+        metavar="URL",
+        default="redis://localhost:6379",
+        help="URL to Redis")
+    parser.add_argument("--baseline", action="store_true")
+    parser.add_argument(
+        "--retry-time",
+        metavar="FLOAT",
+        type=float,
+        default=60.0,
+        help="number of seconds after which unacked jobs will be retried")
+    parser.add_argument(
+        "--jobs",
+        dest="num_jobs",
+        metavar="INT",
+        type=int,
+        default=_NUM_JOBS,
+        help="number of jobs to enqueue/dequeue")
+    subparsers = parser.add_subparsers()
+    _add_consumer_command(subparsers)
+    _add_producer_command(subparsers)
+    args = parser.parse_args()
+    args.func(args)
 
+
+def _add_consumer_command(subparsers):
+    parser = subparsers.add_parser("consumer")
+    parser.add_argument(
+        "--unacked-prob",
+        metavar="FLOAT",
+        type=float,
+        default=0.0,
+        help="probability of not acking a job")
+    parser.set_defaults(func=_run_consumer_benchmark)
+
+
+def _add_producer_command(subparsers):
+    parser = subparsers.add_parser("producer")
+    parser.set_defaults(func=_run_producer_benchmark)
+
+
+def _run_consumer_benchmark(args):
+    queue = _make_queue(args)
+    _run_benchmark(
+        benchmark_consumer,
+        queue,
+        args.num_jobs,
+        kwargs={"unacked_prob": args.unacked_prob})
+
+
+def _run_producer_benchmark(args):
+    queue = _make_queue(args)
+    _run_benchmark(benchmark_producer, queue, args.num_jobs)
+
+
+def _make_queue(args):
     redis = Redis.from_url(args.redis_url)
     if args.baseline:
-        queue = SimpleQueue(redis)
-    else:
-        queue = Queue(redis, "__bench", serializer=None)
+        return SimpleQueue(redis)
 
-    num_jobs = 10000
-    try:
-        timing = func(queue, num_jobs)
-        jobs_per_sec = round(num_jobs / timing, 3)
-        print(f"{jobs_per_sec} jobs/s")
-    finally:
-        queue.purge()
+    return Queue(redis, "__bench", retry_time=args.retry_time, serializer=None)
+
+
+def _run_benchmark(func, queue, num_jobs, kwargs=None):
+    elapsed_time = func(queue, num_jobs, **(kwargs or {}))
+    jobs_per_sec = round(num_jobs / elapsed_time, 3)
+    print(f"{jobs_per_sec} jobs/s")
 
 
 if __name__ == "__main__":

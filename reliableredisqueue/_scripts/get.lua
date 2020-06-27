@@ -5,7 +5,8 @@ local timestamp = tonumber(ARGV[1])
 local max_age = timestamp - tonumber(ARGV[2])
 local uids = redis.call('ZRANGEBYSCORE', unacked, 0, max_age)
 if #uids > 0 then
-    redis.call('LPUSH', ready, table.unpack(uids))
+    local unpack = unpack or table.unpack
+    redis.call('LPUSH', ready, unpack(uids))
     redis.call('ZREMRANGEBYSCORE', unacked, 0, max_age)
 end
 -- The loop will run a single iteration most of the time.
