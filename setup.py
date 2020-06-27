@@ -1,12 +1,24 @@
 #!/usr/bin/env python
 
+import os
+
 from distutils.core import setup
 
-exec(open("reliableredisqueue/version.py").read())
+
+def get_version(rel_path):
+    here = os.path.abspath(os.path.dirname(__file__))
+    with open(os.path.join(here, rel_path)) as file:
+        for line in file:
+            if line.startswith("__version__"):
+                delim = '"' if '"' in line else "'"
+                return line.split(delim)[1]
+
+    raise RuntimeError("Unable to find version string.")
+
 
 setup(
     name="reliableredisqueue",
-    version=__version__,
+    version=get_version("reliableredisqueue/__init__.py"),
     author="Jean Vancoppenolle",
     author_email="Vancoppenolle@ferret-go.com",
     packages=[
