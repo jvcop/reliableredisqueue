@@ -35,9 +35,14 @@ class Queue:
         if retry_time <= 0:
             raise ValueError("retry_time must be > 0")
 
+        self.name = name
         self.retry_time = retry_time
         self.serializer = serializer
         self._queue = _backend.RedisQueue(redis, name, retry_time=retry_time)
+
+    @property
+    def redis(self):
+        return self._queue.redis
 
     def info(self):
         """Return a dict with statistics about the queue. This
